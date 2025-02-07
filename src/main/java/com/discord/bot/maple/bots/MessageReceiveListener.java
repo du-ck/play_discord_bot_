@@ -47,6 +47,7 @@ public class MessageReceiveListener extends ListenerAdapter {
                         "!헤영지\n" +
                         "!유틸\n" +
                         "!공략\n" +
+                        "!도핑\n" +
                         "```").queue();
                 break;
             case "!ping" :
