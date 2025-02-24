@@ -19,7 +19,7 @@ public class BuffTimer {
     }
 
     // 매 시간 30분마다 실행
-    @Scheduled(cron = "0 30 * * * *")   //초 분
+    /*@Scheduled(cron = "0 30 * * * *")   //초 분
     public void run() {
         LocalDateTime now = LocalDateTime.now();
 
@@ -42,5 +42,5 @@ public class BuffTimer {
             System.out.println(message);
             channel.sendMessage(message).queue();
         }
-    }
+    }*/
 }
