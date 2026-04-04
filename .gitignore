@@ -22,3 +22,9 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# 민감 정보 (토큰 등) - git 제외
+application-local.properties
+
+# H2 DB 파일
+data/
