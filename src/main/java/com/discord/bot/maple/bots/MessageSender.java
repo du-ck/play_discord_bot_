@@ -17,11 +17,11 @@ public class MessageSender {
         this.jda = jda;
     }
 
-    @Scheduled(cron = "0 0 9 * * WED", zone = "Asia/Seoul")      //매주 수요일 오전9시
+    @Scheduled(cron = "0 0 18 * * WED", zone = "Asia/Seoul")      //매주 수요일 오전9시
     public void culvertNotice() {   //수로 공지
 
         // Discord 채널 ID를 설정하세요
-        String channelId = "1343608742218043502";   //길드공지 채널id
+        String channelId = "1230391079317147693";   //길드공지 채널id
         TextChannel channel = jda.getTextChannelById(channelId);
 
         if (channel == null) {
@@ -29,7 +29,9 @@ public class MessageSender {
             return;
         }
 
-        String message = "<@&1328998233720098856> 노블을 쓰고싶다면 수로 ㄱㄱ혓";
+        //String message = "<@&1328998233720098856> 노블을 쓰고싶다면 수로 ㄱㄱ혓";
+        String message = "@everyone 오늘은 수로 / 플래그 정산일입니다.\n" +
+                "수플 참여기록 없을 시 노블스킬 사용 제한됩니다.";
         channel.sendMessage(message).queue();
     }
 }
