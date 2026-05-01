@@ -20,6 +20,7 @@ public class JdaConfig {
 
     @Bean
     public JDA jda(BotConfig botConfig,
+                   MessageReceiveListener messageReceiveListener,
                    SlashReceiveListener slashReceiveListener,
                    BossScheduleListener bossScheduleListener) throws Exception {
 
@@ -31,7 +32,7 @@ public class JdaConfig {
         JDA jda = JDABuilder.createDefault(botConfig.getBotToken())
                 .enableIntents(intents)
                 .setActivity(Activity.customStatus("재핵ㄱㄱ혓"))
-                .addEventListeners(new MessageReceiveListener())
+                .addEventListeners(messageReceiveListener)    // Spring 빈 주입
                 .addEventListeners(slashReceiveListener)      // Spring 빈 주입
                 .addEventListeners(bossScheduleListener)      // Spring 빈 주입
                 .build();

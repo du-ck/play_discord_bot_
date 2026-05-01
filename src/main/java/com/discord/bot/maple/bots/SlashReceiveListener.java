@@ -3,6 +3,7 @@ package com.discord.bot.maple.bots;
 import com.discord.bot.maple.bots.exp.ExpLoader;
 import com.discord.bot.maple.bots.exp.ExpTable;
 import com.discord.bot.maple.bots.exp.ExpTrain;
+import com.discord.bot.maple.bots.exp.ExpTrainHolder;
 import com.discord.bot.maple.bots.schedule.BossScheduleListener;
 import com.discord.bot.maple.bots.schedule.BossScheduleManager;
 import com.discord.bot.maple.bots.schedule.BossScheduleSession;
@@ -29,33 +30,50 @@ import java.util.Set;
 @Component
 public class SlashReceiveListener extends ListenerAdapter {
 
+    private static final String[] DAY_NAMES = {"월", "화", "수", "목", "금", "토", "일"};
+
+    private static final Map<Integer, Long> EXP_POTIONS = Map.of(
+            199, 571115568L,
+            209, 6120258214L,
+            219, 22164317197L,
+            229, 64359295696L,
+            239, 137783047111L,
+            249, 294971656640L,
+            269, 2438047518853L
+    );
+
+    private static final DateTimeFormatter INPUT_FORMATTER  = DateTimeFormatter.ofPattern("HHmm");
+    private static final DateTimeFormatter OUTPUT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+
     private final BossScheduleManager bossScheduleManager;
+    private final Util util;
+    private final CoreCalculator coreCalculator;
+    private final FragmentCalculator fragmentCalculator;
+    private final ExpTrainHolder expTrainHolder;
 
-    public SlashReceiveListener(BossScheduleManager bossScheduleManager) {
+    public SlashReceiveListener(BossScheduleManager bossScheduleManager,
+                                Util util,
+                                CoreCalculator coreCalculator,
+                                FragmentCalculator fragmentCalculator,
+                                ExpTrainHolder expTrainHolder) {
         this.bossScheduleManager = bossScheduleManager;
+        this.util = util;
+        this.coreCalculator = coreCalculator;
+        this.fragmentCalculator = fragmentCalculator;
+        this.expTrainHolder = expTrainHolder;
     }
-
-    private long expPotion199 = 571115568L;
-    private long expPotion209 = 6120258214L;
-    private long expPotion219 = 22164317197L;
-    private long expPotion229 = 64359295696L;
-    private long expPotion239 = 137783047111L;
-    private long expPotion249 = 294971656640L;
-    private long expPotion269 = 2438047518853L;
 
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
         String command = event.getName();
-        Util util = Util.getInstance();
         List<ExpTable> expTable = ExpLoader.getExpTable();
-        List<ExpTrain> expTrain = ExpTrain.getInstance();
+        List<ExpTrain> expTrain = expTrainHolder.getTrains();
 
         switch (command) {
             case "ping":
                 event.reply("**Pong!**").queue();
                 break;
             case "조각계산":
-                CoreCalculator coreCalculator = CoreCalculator.getInstance();
                 String coreType = event.getOption("코어타입").getAsString();
                 int currentLevel = event.getOption("현재레벨").getAsInt();
                 int targetLevel = event.getOption("목표레벨").getAsInt();
@@ -96,16 +114,14 @@ public class SlashReceiveListener extends ListenerAdapter {
                     }
                 }
 
-                DateTimeFormatter inputFormatter = DateTimeFormatter.ofPattern("HHmm");
-                LocalTime startTime = LocalTime.parse(expTime, inputFormatter);
+                LocalTime startTime = LocalTime.parse(expTime, INPUT_FORMATTER);
                 LocalDateTime startDateTime = LocalDate.now().atTime(startTime);
 
                 try {
                     expTrain.clear();
-                    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
                     for (int i = 0; i < expCount; i++) {
                         LocalDateTime next = startDateTime.plusMinutes((long) expTerm * i);
-                        expTrain.add(new ExpTrain(next.format(formatter), i + 1, expCount));
+                        expTrain.add(new ExpTrain(next.format(OUTPUT_FORMATTER), i + 1, expCount));
                     }
                 } catch (Exception ex) {
                     expTrain.clear();
@@ -139,7 +155,6 @@ public class SlashReceiveListener extends ListenerAdapter {
                     event.reply("입력값은 0 이상이여야 합니다.").queue();
                     break;
                 }
-                FragmentCalculator fragmentCalculator = FragmentCalculator.getInstance();
                 int result = fragmentCalculator.calculateFragments(killCount, itemDropRatePct, totalNeedFragment);
                 File file2 = util.getFile("wealth_small_2.png");
                 event.reply("**" + totalNeedFragment + "** 개의 조각을 얻기 위해 \n" +
@@ -154,7 +169,6 @@ public class SlashReceiveListener extends ListenerAdapter {
     // ───────── 보스일정 핸들러 ─────────
 
     private void handleBossScheduleCreate(SlashCommandInteractionEvent event) {
-        // 쓰레드 채널인지 확인
         if (event.getChannelType() != ChannelType.GUILD_PUBLIC_THREAD
                 && event.getChannelType() != ChannelType.GUILD_PRIVATE_THREAD) {
             event.reply("❌ 이 명령어는 **쓰레드** 안에서만 사용할 수 있습니다!").setEphemeral(true).queue();
@@ -179,22 +193,15 @@ public class SlashReceiveListener extends ListenerAdapter {
     }
 
     private void handleBossScheduleResult(SlashCommandInteractionEvent event) {
-        String threadId = event.getChannel().getId();
-        BossScheduleSession session = bossScheduleManager.getSession(threadId);
+        BossScheduleSession session = getSessionOrReply(event);
+        if (session == null) return;
 
-        if (session == null) {
-            event.reply("❌ 진행 중인 보스 일정 조율이 없습니다. `/보스일정` 으로 먼저 시작하세요.").setEphemeral(true).queue();
-            return;
-        }
-
-        // Guild에서 닉네임 직접 조회 후 임베드 빌드 (봇 재시작 후에도 정확한 닉네임 표시)
         event.deferReply().queue();
 
         Set<String> userIds = session.getUserSelections().keySet();
         String[] userIdArray = userIds.toArray(new String[0]);
 
         event.getGuild().retrieveMembersByIds(userIdArray).onSuccess(members -> {
-            // 조회된 멤버 닉네임 캐싱 후 임베드 빌드
             members.forEach(member ->
                     bossScheduleManager.cacheNickname(member.getId(), member.getEffectiveName())
             );
@@ -205,37 +212,29 @@ public class SlashReceiveListener extends ListenerAdapter {
     }
 
     private void handleBossScheduleConfirm(SlashCommandInteractionEvent event) {
-        String threadId = event.getChannel().getId();
-        BossScheduleSession session = bossScheduleManager.getSession(threadId);
+        BossScheduleSession session = getSessionOrReply(event);
+        if (session == null) return;
 
-        if (session == null) {
-            event.reply("❌ 진행 중인 보스 일정 조율이 없습니다.").setEphemeral(true).queue();
-            return;
-        }
+        String dayStr  = event.getOption("요일").getAsString();
+        String timeStr = event.getOption("시간").getAsString();
 
-        String dayStr  = event.getOption("요일").getAsString();   // "월"~"일"
-        String timeStr = event.getOption("시간").getAsString();   // "21:00"
-
-        String[] dayNames = {"월", "화", "수", "목", "금", "토", "일"};
         int dayIndex = -1;
-        for (int i = 0; i < dayNames.length; i++) {
-            if (dayNames[i].equals(dayStr)) { dayIndex = i; break; }
+        for (int i = 0; i < DAY_NAMES.length; i++) {
+            if (DAY_NAMES[i].equals(dayStr)) { dayIndex = i; break; }
         }
         if (dayIndex == -1) {
             event.reply("❌ 요일을 올바르게 선택해 주세요.").setEphemeral(true).queue();
             return;
         }
 
-        // 시간 형식 검증 HH:mm
         if (!timeStr.matches("^([01]?\\d|2[0-3]):[0-5]\\d$")) {
             event.reply("❌ 시간은 `21:00` 형식으로 입력해 주세요.").setEphemeral(true).queue();
             return;
         }
 
-        // DB 저장
+        String threadId = event.getChannel().getId();
         bossScheduleManager.confirm(threadId, dayIndex, timeStr);
 
-        // 메인 임베드 업데이트
         String messageId = bossScheduleManager.getMessageId(threadId);
         BossScheduleSession updated = bossScheduleManager.getSession(threadId);
 
@@ -247,7 +246,6 @@ public class SlashReceiveListener extends ListenerAdapter {
                     ).queue());
         }
 
-        // 파티원 전원 멘션 알림
         Set<String> userIds = session.getUserSelections().keySet();
         String mentions = userIds.stream()
                 .map(id -> "<@" + id + ">")
@@ -262,6 +260,20 @@ public class SlashReceiveListener extends ListenerAdapter {
         String threadId = event.getChannel().getId();
         bossScheduleManager.removeSession(threadId);
         event.reply("🗑️ 보스 일정 조율이 초기화되었습니다.").queue();
+    }
+
+    /**
+     * 현재 쓰레드의 보스 일정 세션을 조회하고,
+     * 없으면 에러 메시지를 전송 후 null을 반환합니다.
+     */
+    private BossScheduleSession getSessionOrReply(SlashCommandInteractionEvent event) {
+        String threadId = event.getChannel().getId();
+        BossScheduleSession session = bossScheduleManager.getSession(threadId);
+        if (session == null) {
+            event.reply("❌ 진행 중인 보스 일정 조율이 없습니다. `/보스일정` 으로 먼저 시작하세요.")
+                    .setEphemeral(true).queue();
+        }
+        return session;
     }
 
     @Override

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.concrete.VoiceChannel;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -30,6 +31,12 @@ public class TimeRefresher {
 
     private final JDA jda;
 
+    @Value("${discord.channels.server-time}")
+    private String serverTimeChannelId;
+
+    @Value("${discord.channels.server-status}")
+    private String serverStatusChannelId;
+
     private String lastStatus = "";
 
     public TimeRefresher(JDA jda) {
@@ -41,12 +48,10 @@ public class TimeRefresher {
     public void refreshServerTime() {
         LocalDateTime now = LocalDateTime.now();
 
-        // Discord 채널 ID를 설정하세요
-        String channelId = "1367509350268010516";
-        VoiceChannel channel = jda.getVoiceChannelById(channelId);
+        VoiceChannel channel = jda.getVoiceChannelById(serverTimeChannelId);
 
         if (channel == null) {
-            System.err.println("채널을 찾을 수 없습니다: " + channelId);
+            System.err.println("채널을 찾을 수 없습니다: " + serverTimeChannelId);
             return;
         }
 
@@ -105,8 +110,7 @@ public class TimeRefresher {
             // 우리가 설정할 최종 채널 이름 형태
             String newChannelName = "서버상태:\u1CBC" + statusText;
 
-            String channelId = "1461348967756468234";
-            VoiceChannel channel = jda.getVoiceChannelById(channelId);
+            VoiceChannel channel = jda.getVoiceChannelById(serverStatusChannelId);
 
             if (channel != null) {
                 // 1. 현재 채널의 이름을 가져옴

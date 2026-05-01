@@ -1,19 +1,12 @@
 package com.discord.bot.maple.bots;
 
+import org.springframework.stereotype.Component;
+
 import java.io.File;
 
+@Component
 public class Util {
-    private static Util instance;
-    private Util() {
 
-    }
-
-    public static Util getInstance() {
-        if (instance == null) {
-            instance = new Util();
-        }
-        return instance;
-    }
     public final String path = "/home/opc/bot/resource";
     //public final String path = "\\javaProject\\github\\discord_bot\\bot\\play_discord_bot_\\src\\main\\resources";
 
@@ -34,7 +27,7 @@ public class Util {
      */
     public static boolean isValidHHmm(String input) {
         if (input == null || input.length() != 4 || !input.matches("\\d{4}")) {
-            return false; // 4자리 숫자가 아니면 바로 false
+            return false;
         }
 
         int hh = Integer.parseInt(input.substring(0, 2));

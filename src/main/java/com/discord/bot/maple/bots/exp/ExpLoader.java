@@ -28,7 +28,7 @@ public class ExpLoader {
     }
 
     public static void loadExpTable() {
-        Util util = Util.getInstance();
+        Util util = new Util();
 
         try (CSVReader reader = new CSVReader(new FileReader(util.getFile("exp.csv")))) {
             String[] nextLine;
