@@ -126,6 +126,7 @@ public class MessageReceiveListener extends ListenerAdapter {
                 "/필요소재비계산\n" +
                 "/보스일정\n" +
                 "/보스일정결과\n" +
+                "/보스일정확정\n" +
                 "/보스일정초기화\n" +
                 "```").queue();
     }
