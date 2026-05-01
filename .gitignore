@@ -28,3 +28,7 @@ application-local.properties
 
 # H2 DB 파일
 data/
+/.claude
+/build
+/build
+/.gradle
