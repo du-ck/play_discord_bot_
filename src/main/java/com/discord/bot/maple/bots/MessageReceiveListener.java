@@ -69,6 +69,7 @@ public class MessageReceiveListener extends ListenerAdapter {
                         "/보스일정\n" +
                         "/보스일정결과\n" +
                         "/보스일정초기화\n" +
+                        "/보스일정확정\n" +
                         "```").queue();
                 break;
             case "!ping" :
@@ -347,7 +348,7 @@ public class MessageReceiveListener extends ListenerAdapter {
                     //https://archive.is/yGH06
                     event.getChannel().sendMessage(
                                 "[추옵 계산 사이트](<https://www.whackybeanz.com/calc/equips/setup>) \n" +
-                                    "[추옵 계산 사이트 가이드](<https://archive.is/I8tUg>) \n" +
+                                    "[추옵 계산 사이트 가이드](<https://archive.is/WNEKB>) \n" +
                                     "## 장비 렙제별 적정 추옵표 \n" +
                                     "Mid 단계까지는 강/영환불, 그 이후로는 검환불 추천")
                             .addFiles(FileUpload.fromData(file))

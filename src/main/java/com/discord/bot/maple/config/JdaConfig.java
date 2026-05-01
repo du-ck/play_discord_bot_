@@ -48,7 +48,8 @@ public class JdaConfig {
                                         .addChoice("강화코어", "강화코어")
                                         .addChoice("마스터리코어", "마스터리코어")
                                         .addChoice("스킬코어", "스킬코어")
-                                        .addChoice("공용코어", "공용코어"),
+                                        .addChoice("공용코어", "공용코어")
+                                        .addChoice("3차공용코어", "3차공용코어"),
                                 new OptionData(OptionType.INTEGER, "현재레벨", "현재 레벨", true),
                                 new OptionData(OptionType.INTEGER, "목표레벨", "목표 레벨", true)
                         ),
