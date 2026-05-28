@@ -17,10 +17,12 @@ public class MessageReceiveListener extends ListenerAdapter {
 
     private final Util util;
     private final ExpTrainHolder expTrainHolder;
+    private final ExchangeRateService exchangeRateService;
 
-    public MessageReceiveListener(Util util, ExpTrainHolder expTrainHolder) {
+    public MessageReceiveListener(Util util, ExpTrainHolder expTrainHolder, ExchangeRateService exchangeRateService) {
         this.util = util;
         this.expTrainHolder = expTrainHolder;
+        this.exchangeRateService = exchangeRateService;
     }
 
     @Override
@@ -62,6 +64,7 @@ public class MessageReceiveListener extends ListenerAdapter {
             case "!추옵" -> handleFlame(event);
             case "!반상" -> sendImage(event, "ring_box.png", "반지 상자 확률 정리표");
             case "!몬파" -> handleMonsterPark(event);
+            case "!환율" -> handleExchangeRate(event);
         }
     }
 
@@ -120,6 +123,7 @@ public class MessageReceiveListener extends ListenerAdapter {
                 "!연뿌\n" +
                 "!반상\n" +
                 "!몬파\n" +
+                //"!환율\n" +
                 "/연뿌등록\n" +
                 "/연뿌초기화\n" +
                 "/조각계산\n" +
@@ -282,5 +286,19 @@ public class MessageReceiveListener extends ListenerAdapter {
         } catch (Exception e) {
             System.out.println(e.getMessage());
         }
+    }
+
+    private void handleExchangeRate(MessageReceivedEvent event) {
+        String message = exchangeRateService.getCachedMessage();
+        byte[] chart = exchangeRateService.getCachedChartBytes();
+
+        if (message == null || chart == null) {
+            event.getChannel().sendMessage("환율 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.").queue();
+            return;
+        }
+
+        event.getChannel().sendMessage(message)
+                .addFiles(FileUpload.fromData(chart, "exchange_rate.png"))
+                .queue();
     }
 }
