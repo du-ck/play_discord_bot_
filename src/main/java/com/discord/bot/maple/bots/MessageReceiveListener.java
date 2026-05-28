@@ -243,7 +243,10 @@ public class MessageReceiveListener extends ListenerAdapter {
                 "- [멀티펫 하는법](<https://archive.is/7FvgU>) \n" +
                 "- [유가든 길뚫 (토템 종결 파밍)](<https://archive.is/WJ9lN>) \n" +
                 "- [유가든 일퀘 (토템 종결 파밍)](<https://archive.is/qfoJz>) \n" +
-                "- [템세팅 빌드](<https://arca.live/b/globalmaplestory/121755229>) \n"
+                "- [템세팅 빌드](<https://arca.live/b/globalmaplestory/121755229>) \n" +
+                "- [모루 팁 - 무기편](<https://archive.is/bLVsj>) \n" +
+                "- [모루 팁 - 방어구편](<https://archive.is/j7dxR>) \n" +
+                "- [모루 획득처 정리](<https://archive.is/KNcXU>) \n"
         ).queue();
     }
 
