@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 @Component
@@ -44,29 +45,37 @@ public class ExchangeRateService {
     // 캐시
     private volatile String cachedMessage;
     private volatile byte[] cachedChartBytes;
+    private final AtomicBoolean isRefreshing = new AtomicBoolean(false);
 
     public String getCachedMessage() { return cachedMessage; }
     public byte[] getCachedChartBytes() { return cachedChartBytes; }
 
+    /**
+     * 캐시가 없을 때 !환율 입력 시 호출.
+     * 재시도 루프 없이 1회만 시도하고 성공 시 캐시 저장. 백그라운드 실행.
+     */
+    public void tryRefreshOnce() {
+        if (!isRefreshing.compareAndSet(false, true)) return;
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                fetchAndCache();
+                System.out.println("[ExchangeRateService] 수동 캐시 갱신 완료");
+            } catch (Exception e) {
+                System.err.println("[ExchangeRateService] 수동 캐시 갱신 실패: " + e.getMessage());
+            } finally {
+                isRefreshing.set(false);
+            }
+        });
+    }
+
     // ───────── 캐시 갱신 ─────────
 
-    /** 앱 시작 시 최초 1회 로드 (날짜 무관, 가장 최신 데이터) */
+    /** 앱 시작 시 최초 1회 로드 */
     @PostConstruct
     public void init() {
         try {
-            CompletableFuture<String> rateFuture = CompletableFuture.supplyAsync(() -> {
-                try { return getCurrentRate(null); } catch (Exception e) { return null; }
-            });
-            CompletableFuture<TreeMap<String, Double>> histFuture = CompletableFuture.supplyAsync(() -> {
-                try { return getHistoricalRates(7); } catch (Exception e) { return new TreeMap<>(); }
-            });
-
-            String rate = rateFuture.get();
-            TreeMap<String, Double> hist = histFuture.get();
-            byte[] chart = getChartImage(hist);
-
-            cachedMessage = buildRateMessage(rate, hist);
-            cachedChartBytes = chart;
+            fetchAndCache();
             System.out.println("[ExchangeRateService] 초기 환율 캐시 로드 완료");
         } catch (Exception e) {
             System.err.println("[ExchangeRateService] 초기 환율 캐시 로드 실패: " + e.getMessage());
@@ -74,8 +83,34 @@ public class ExchangeRateService {
     }
 
     /**
+     * 공통 fetch + 캐시 저장 로직.
+     * getCurrentRate(null) + getHistoricalRates(7) 병렬 호출 후 캐시 갱신.
+     */
+    private void fetchAndCache() throws Exception {
+        CompletableFuture<String> rateFuture = CompletableFuture.supplyAsync(() -> {
+            try { return getCurrentRate(null); } catch (Exception e) { return null; }
+        });
+        CompletableFuture<TreeMap<String, Double>> histFuture = CompletableFuture.supplyAsync(() -> {
+            try { return getHistoricalRates(7); } catch (Exception e) { return new TreeMap<>(); }
+        });
+
+        String rate = rateFuture.get();
+        TreeMap<String, Double> hist = histFuture.get();
+
+        // 오늘 데이터가 있으면 그래프에도 포함
+        if (rate != null) {
+            hist.put(LocalDate.now().toString(), Double.parseDouble(rate.replace(",", "")));
+        }
+
+        byte[] chart = getChartImage(hist);
+        cachedMessage = buildRateMessage(rate, hist);
+        cachedChartBytes = chart;
+    }
+
+    /**
      * 매 영업일 오전 11시 갱신.
      * 오늘 날짜로 데이터를 조회하고, 미갱신이면 2분 간격으로 최대 10회 재시도.
+     * Exception 발생 시에도 재시도 계속 (네트워크 일시 오류 대응).
      * (10회 초과 시 공휴일로 간주하고 종료)
      */
     @Scheduled(cron = "0 0 11 * * MON-FRI", zone = "Asia/Seoul")
@@ -87,8 +122,8 @@ public class ExchangeRateService {
                 String rate = getCurrentRate(today);
 
                 if (rate != null) {
-                    // 오늘 데이터 준비됨
                     TreeMap<String, Double> hist = getHistoricalRates(7);
+                    hist.put(LocalDate.now().toString(), Double.parseDouble(rate.replace(",", "")));
                     byte[] chart = getChartImage(hist);
                     cachedMessage = buildRateMessage(rate, hist);
                     cachedChartBytes = chart;
@@ -106,8 +141,14 @@ public class ExchangeRateService {
                 System.err.println("[ExchangeRateService] 재시도 중 인터럽트");
                 return;
             } catch (Exception e) {
-                System.err.println("[ExchangeRateService] 환율 갱신 오류: " + e.getMessage());
-                return;
+                // 네트워크 일시 오류 등 → 재시도 계속
+                System.err.println("[ExchangeRateService] 환율 갱신 오류 (" + attempt + "/" + MAX_RETRIES + "): " + e.getMessage());
+                try {
+                    Thread.sleep(RETRY_INTERVAL_MS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
             }
         }
 
@@ -142,16 +183,18 @@ public class ExchangeRateService {
     }
 
     /**
-     * 수출입은행 API로 최근 days일간 USD/KRW 환율 반환 (날짜 오름차순 TreeMap).
-     * 각 날짜를 병렬 요청으로 가져옴. 주말/공휴일은 빈 배열이므로 자동으로 제외됨.
+     * 캘린더 기준 businessDays * 2일 조회 후 마지막 businessDays개 영업일 데이터 반환.
+     * 주말/공휴일 제외 후에도 항상 businessDays개에 가까운 데이터 포인트 보장.
+     * 각 날짜를 병렬 요청으로 가져옴.
      */
-    private TreeMap<String, Double> getHistoricalRates(int days) throws Exception {
+    private TreeMap<String, Double> getHistoricalRates(int businessDays) throws Exception {
+        int calendarDays = businessDays * 2;
         Map<String, Double> temp = new ConcurrentHashMap<>();
         List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-        for (int i = days; i >= 1; i--) {
-            final String date = LocalDate.now().minusDays(i).toString();                  // yyyy-MM-dd (그래프 키)
-            final String searchDate = LocalDate.now().minusDays(i).format(SEARCH_DATE_FORMATTER); // yyyyMMdd (API 파라미터)
+        for (int i = calendarDays; i >= 1; i--) {
+            final String date = LocalDate.now().minusDays(i).toString();
+            final String searchDate = LocalDate.now().minusDays(i).format(SEARCH_DATE_FORMATTER);
             futures.add(CompletableFuture.runAsync(() -> {
                 try {
                     String rate = getCurrentRate(searchDate);
@@ -163,7 +206,17 @@ public class ExchangeRateService {
         }
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
-        return new TreeMap<>(temp);
+        TreeMap<String, Double> sorted = new TreeMap<>(temp);
+
+        // 최근 businessDays개만 반환
+        if (sorted.size() > businessDays) {
+            List<String> keys = new ArrayList<>(sorted.keySet());
+            TreeMap<String, Double> result = new TreeMap<>();
+            keys.subList(keys.size() - businessDays, keys.size())
+                    .forEach(k -> result.put(k, sorted.get(k)));
+            return result;
+        }
+        return sorted;
     }
 
     /** QuickChart.io에서 다크 테마 꺾은선 그래프 PNG 바이트 배열 반환. */
@@ -183,8 +236,8 @@ public class ExchangeRateService {
         ObjectNode dataset = chartData.putArray("datasets").addObject();
         dataset.put("label", "USD/KRW");
         dataset.put("fill", true);
-        dataset.put("borderColor", "rgb(99, 179, 237)");       // 밝은 파란 라인
-        dataset.put("backgroundColor", "rgba(99, 179, 237, 0.15)"); // 반투명 그라디언트 필
+        dataset.put("borderColor", "rgb(99, 179, 237)");
+        dataset.put("backgroundColor", "rgba(99, 179, 237, 0.15)");
         dataset.put("pointBackgroundColor", "rgb(99, 179, 237)");
         dataset.put("pointBorderColor", "rgb(99, 179, 237)");
         dataset.put("pointRadius", 4);
@@ -227,10 +280,13 @@ public class ExchangeRateService {
     // ───────── 메시지 빌드 ─────────
 
     private String buildRateMessage(String currentRateStr, TreeMap<String, Double> historical) {
-        List<Map.Entry<String, Double>> entries = new ArrayList<>(historical.entrySet());
+        // hist에 오늘 데이터가 포함될 수 있으므로 오늘 키 제외 후 전일 계산
+        String todayKey = LocalDate.now().toString();
+        List<Map.Entry<String, Double>> entries = historical.entrySet().stream()
+                .filter(e -> !e.getKey().equals(todayKey))
+                .collect(Collectors.toList());
         int size = entries.size();
 
-        // 역사 데이터 마지막 = 어제(또는 최근 영업일), 마지막에서 두 번째 = 그 전날
         double latestHistorical = size > 0 ? entries.get(size - 1).getValue() : 0;
         double secondLatest    = size >= 2 ? entries.get(size - 2).getValue() : latestHistorical;
 
@@ -238,8 +294,8 @@ public class ExchangeRateService {
                 ? Double.parseDouble(currentRateStr.replace(",", ""))
                 : latestHistorical;
 
-        // 오늘 데이터 있음 → 전일 = 역사 마지막(어제)
-        // 오늘 데이터 없음(주말) → 전일 = 역사 마지막에서 두 번째
+        // 오늘 데이터 있음 → 전일 = 어제(역사 마지막)
+        // 오늘 데이터 없음(주말) → 전일 = 마지막에서 두 번째
         double prevRate = (currentRateStr != null) ? latestHistorical : secondLatest;
 
         double diff = currentRate - prevRate;

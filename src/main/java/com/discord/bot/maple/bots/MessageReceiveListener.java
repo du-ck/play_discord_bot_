@@ -293,6 +293,7 @@ public class MessageReceiveListener extends ListenerAdapter {
         byte[] chart = exchangeRateService.getCachedChartBytes();
 
         if (message == null || chart == null) {
+            exchangeRateService.tryRefreshOnce();
             event.getChannel().sendMessage("환율 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.").queue();
             return;
         }
