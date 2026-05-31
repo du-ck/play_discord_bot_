@@ -2,9 +2,12 @@ package com.discord.bot.maple.bots;
 
 import com.discord.bot.maple.bots.exp.ExpTrain;
 import com.discord.bot.maple.bots.exp.ExpTrainHolder;
+import net.dv8tion.jda.api.EmbedBuilder;
+import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.utils.FileUpload;
+
 import org.jetbrains.annotations.NotNull;
 import org.springframework.stereotype.Component;
 
@@ -289,16 +292,23 @@ public class MessageReceiveListener extends ListenerAdapter {
     }
 
     private void handleExchangeRate(MessageReceivedEvent event) {
-        String message = exchangeRateService.getCachedMessage();
+        MessageEmbed embed = exchangeRateService.getCachedEmbed();
         byte[] chart = exchangeRateService.getCachedChartBytes();
 
-        if (message == null || chart == null) {
+        if (embed == null || chart == null) {
             exchangeRateService.tryRefreshOnce();
             event.getChannel().sendMessage("환율 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.").queue();
             return;
         }
 
-        event.getChannel().sendMessage(message)
+        // 오늘 환율 데이터가 없으면(주말/공휴일) 푸터 변경
+        if (exchangeRateService.getCachedRateStr() == null) {
+            embed = new EmbedBuilder(embed)
+                    .setFooter("주말/공휴일로 인해 최근 영업일 기준")
+                    .build();
+        }
+
+        event.getChannel().sendMessageEmbeds(embed)
                 .addFiles(FileUpload.fromData(chart, "exchange_rate.png"))
                 .queue();
     }

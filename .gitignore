@@ -25,6 +25,7 @@ replay_pid*
 
 # 민감 정보 (토큰 등) - git 제외
 application-local.properties
+start.sh
 
 # H2 DB 파일
 data/

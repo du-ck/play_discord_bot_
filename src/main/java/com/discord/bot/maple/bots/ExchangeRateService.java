@@ -2,23 +2,32 @@ package com.discord.bot.maple.bots;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.annotation.PostConstruct;
+import net.dv8tion.jda.api.EmbedBuilder;
+import net.dv8tion.jda.api.entities.MessageEmbed;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import org.knowm.xchart.BitmapEncoder;
+import org.knowm.xchart.XYChart;
+import org.knowm.xchart.XYChartBuilder;
+import org.knowm.xchart.XYSeries;
+import org.knowm.xchart.style.XYStyler;
+import org.knowm.xchart.style.markers.SeriesMarkers;
+
+import java.awt.BasicStroke;
+import java.awt.Color;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -43,12 +52,14 @@ public class ExchangeRateService {
     private static final long RETRY_INTERVAL_MS = 120_000L; // 2분
 
     // 캐시
-    private volatile String cachedMessage;
+    private volatile MessageEmbed cachedEmbed;
     private volatile byte[] cachedChartBytes;
+    private volatile String cachedRateStr;  // null이면 주말/공휴일
     private final AtomicBoolean isRefreshing = new AtomicBoolean(false);
 
-    public String getCachedMessage() { return cachedMessage; }
+    public MessageEmbed getCachedEmbed() { return cachedEmbed; }
     public byte[] getCachedChartBytes() { return cachedChartBytes; }
+    public String getCachedRateStr() { return cachedRateStr; }
 
     /**
      * 캐시가 없을 때 !환율 입력 시 호출.
@@ -84,14 +95,17 @@ public class ExchangeRateService {
 
     /**
      * 공통 fetch + 캐시 저장 로직.
-     * getCurrentRate(null) + getHistoricalRates(7) 병렬 호출 후 캐시 갱신.
+     * getCurrentRate(오늘날짜) + getHistoricalRates(22) 병렬 호출 후 캐시 갱신.
+     * searchdate를 명시해야 오늘 데이터가 확실히 반환됨 (null 조회는 어제 데이터가 올 수 있음).
      */
     private void fetchAndCache() throws Exception {
+        String todayParam = LocalDate.now().format(SEARCH_DATE_FORMATTER);
+
         CompletableFuture<String> rateFuture = CompletableFuture.supplyAsync(() -> {
-            try { return getCurrentRate(null); } catch (Exception e) { return null; }
+            try { return getCurrentRate(todayParam); } catch (Exception e) { return null; }
         });
         CompletableFuture<TreeMap<String, Double>> histFuture = CompletableFuture.supplyAsync(() -> {
-            try { return getHistoricalRates(7); } catch (Exception e) { return new TreeMap<>(); }
+            try { return getHistoricalRates(22); } catch (Exception e) { return new TreeMap<>(); }
         });
 
         String rate = rateFuture.get();
@@ -103,8 +117,9 @@ public class ExchangeRateService {
         }
 
         byte[] chart = getChartImage(hist);
-        cachedMessage = buildRateMessage(rate, hist);
+        cachedEmbed = buildEmbed(rate, hist);
         cachedChartBytes = chart;
+        cachedRateStr = rate;
     }
 
     /**
@@ -122,11 +137,12 @@ public class ExchangeRateService {
                 String rate = getCurrentRate(today);
 
                 if (rate != null) {
-                    TreeMap<String, Double> hist = getHistoricalRates(7);
+                    TreeMap<String, Double> hist = getHistoricalRates(22);
                     hist.put(LocalDate.now().toString(), Double.parseDouble(rate.replace(",", "")));
                     byte[] chart = getChartImage(hist);
-                    cachedMessage = buildRateMessage(rate, hist);
+                    cachedEmbed = buildEmbed(rate, hist);
                     cachedChartBytes = chart;
+                    cachedRateStr = rate;
                     System.out.println("[ExchangeRateService] 환율 캐시 갱신 완료 (" + attempt + "회 시도)");
                     return;
                 }
@@ -163,7 +179,7 @@ public class ExchangeRateService {
      *                   주말/공휴일 또는 미갱신 시 null 반환.
      */
     private String getCurrentRate(String searchDate) throws Exception {
-        String url = "https://www.koreaexim.go.kr/site/program/financial/exchangeJSON"
+        String url = "https://oapi.koreaexim.go.kr/site/program/financial/exchangeJSON"
                 + "?authkey=" + koreaeximApiKey + "&data=AP01"
                 + (searchDate != null ? "&searchdate=" + searchDate : "");
         HttpRequest req = HttpRequest.newBuilder()
@@ -219,67 +235,59 @@ public class ExchangeRateService {
         return sorted;
     }
 
-    /** QuickChart.io에서 다크 테마 꺾은선 그래프 PNG 바이트 배열 반환. */
+    /** XChart XYChart(Date x축)로 Discord 다크 테마 꺾은선(Area) 그래프 PNG 바이트 배열 반환. */
     private byte[] getChartImage(TreeMap<String, Double> rates) throws Exception {
-        List<String> labels = rates.keySet().stream()
-                .map(d -> d.substring(5))
+        List<Date> xData = rates.keySet().stream()
+                .map(d -> Date.from(LocalDate.parse(d)
+                        .atStartOfDay(ZoneId.systemDefault()).toInstant()))
                 .collect(Collectors.toList());
-        List<Double> data = new ArrayList<>(rates.values());
+        List<Double> yData = new ArrayList<>(rates.values());
 
-        ObjectNode chart = objectMapper.createObjectNode();
-        chart.put("type", "line");
+        XYChart chart = new XYChartBuilder().width(800).height(400).build();
+        XYStyler styler = chart.getStyler();
 
-        // 데이터
-        ObjectNode chartData = chart.putObject("data");
-        ArrayNode labelsArr = chartData.putArray("labels");
-        labels.forEach(labelsArr::add);
-        ObjectNode dataset = chartData.putArray("datasets").addObject();
-        dataset.put("label", "USD/KRW");
-        dataset.put("fill", true);
-        dataset.put("borderColor", "rgb(99, 179, 237)");
-        dataset.put("backgroundColor", "rgba(99, 179, 237, 0.15)");
-        dataset.put("pointBackgroundColor", "rgb(99, 179, 237)");
-        dataset.put("pointBorderColor", "rgb(99, 179, 237)");
-        dataset.put("pointRadius", 4);
-        dataset.put("pointHoverRadius", 6);
-        dataset.put("borderWidth", 2);
-        dataset.put("tension", 0.4);
-        ArrayNode dataArr = dataset.putArray("data");
-        data.forEach(dataArr::add);
+        Color bg        = new Color(0x2f, 0x31, 0x36);
+        Color plotBg    = new Color(0x2b, 0x2d, 0x31);
+        Color lineColor = new Color(99, 179, 237);
+        Color fillColor = new Color(99, 179, 237, 60);
+        Color textColor = new Color(0xbb, 0xbb, 0xbb);
+        Color gridColor = new Color(255, 255, 255, 25);
 
-        // 옵션
-        ObjectNode options = chart.putObject("options");
+        styler.setChartBackgroundColor(bg);
+        styler.setPlotBackgroundColor(plotBg);
+        styler.setPlotBorderColor(bg);
+        styler.setChartFontColor(textColor);
+        styler.setAxisTickLabelsColor(textColor);
+        styler.setPlotGridLinesColor(gridColor);
+        styler.setPlotGridLinesStroke(new BasicStroke(0.5f));
+        styler.setLegendVisible(false);
+        styler.setChartTitleVisible(false);
+        styler.setPlotBorderVisible(false);
+        styler.setXAxisTitleVisible(false);
+        styler.setYAxisTitleVisible(false);
+        styler.setDatePattern("MM/dd");
+        styler.setYAxisDecimalPattern("#,###");
 
-        // 범례 숨김
-        options.putObject("plugins").putObject("legend").put("display", false);
+        // Y축 여백: 데이터 최솟값보다 약간 낮게 설정해 선이 바닥에 붙지 않게
+        double minVal = yData.stream().mapToDouble(Double::doubleValue).min().orElse(0);
+        double maxVal = yData.stream().mapToDouble(Double::doubleValue).max().orElse(0);
+        double padding = (maxVal - minVal) * 0.1;
+        styler.setYAxisMin(minVal - padding);
+        styler.setYAxisMax(maxVal + padding);
 
-        // 축
-        ObjectNode scales = options.putObject("scales");
+        XYSeries series = chart.addSeries("USD/KRW", xData, yData);
+        series.setXYSeriesRenderStyle(XYSeries.XYSeriesRenderStyle.Area);
+        series.setLineColor(lineColor);
+        series.setFillColor(fillColor);
+        series.setMarker(SeriesMarkers.NONE);
+        series.setLineWidth(2.5f);
 
-        ObjectNode xAxis = scales.putObject("x");
-        xAxis.putObject("grid").put("color", "rgba(255,255,255,0.08)");
-        xAxis.putObject("ticks").put("color", "#aaaaaa");
-
-        ObjectNode yAxis = scales.putObject("y");
-        yAxis.putObject("grid").put("color", "rgba(255,255,255,0.08)");
-        ObjectNode yTicks = yAxis.putObject("ticks");
-        yTicks.put("color", "#aaaaaa");
-        yTicks.put("precision", 0);
-
-        String chartJson = objectMapper.writeValueAsString(chart);
-        // backgroundColor는 Discord 다크 테마와 어울리는 #2f3136
-        String url = "https://quickchart.io/chart?c="
-                + URLEncoder.encode(chartJson, StandardCharsets.UTF_8)
-                + "&width=800&height=400&backgroundColor=%232f3136";
-
-        HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
-        HttpResponse<byte[]> res = httpClient.send(req, HttpResponse.BodyHandlers.ofByteArray());
-        return res.body();
+        return BitmapEncoder.getBitmapBytes(chart, BitmapEncoder.BitmapFormat.PNG);
     }
 
     // ───────── 메시지 빌드 ─────────
 
-    private String buildRateMessage(String currentRateStr, TreeMap<String, Double> historical) {
+    private MessageEmbed buildEmbed(String currentRateStr, TreeMap<String, Double> historical) {
         // hist에 오늘 데이터가 포함될 수 있으므로 오늘 키 제외 후 전일 계산
         String todayKey = LocalDate.now().toString();
         List<Map.Entry<String, Double>> entries = historical.entrySet().stream()
@@ -299,26 +307,32 @@ public class ExchangeRateService {
         double prevRate = (currentRateStr != null) ? latestHistorical : secondLatest;
 
         double diff = currentRate - prevRate;
-        double pct = prevRate != 0 ? (diff / prevRate * 100) : 0;
+        double pct  = prevRate != 0 ? (diff / prevRate * 100) : 0;
 
         String arrow = diff >= 0 ? "▲" : "▼";
-        String colorCode = diff >= 0 ? "[31m" : "[34m";
-        String reset = "[0m";
 
         String displayRate = (currentRateStr != null)
                 ? currentRateStr
                 : String.format("%.2f", latestHistorical);
         String source = (currentRateStr != null)
-                ? "※ 매 영업일 오전 11시 갱신"
-                : "※ 주말/공휴일로 인해 최근 영업일 기준";
+                ? "매 영업일 오전 11시 갱신"
+                : "주말/공휴일로 인해 최근 영업일 오전 11시 기준";
 
-        return "```ansi\n"
-                + "💱 USD/KRW 환율\n"
-                + "현재: " + displayRate + " 원\n"
-                + "전일 대비: " + colorCode
-                + String.format("%s %.2f (%+.2f%%)", arrow, Math.abs(diff), pct)
-                + reset + "\n"
-                + source + "\n"
-                + "```";
+        // 상승 → 빨간 사이드바 / 하락 → 파란 사이드바 (한국 주식 관례)
+        Color sidebarColor = diff >= 0
+                ? new Color(0xed, 0x42, 0x45)
+                : new Color(0x58, 0x65, 0xf2);
+
+        String titleEmoji = diff >= 0 ? "📈" : "📉";
+        String diffText = String.format("%s %.2f (%+.2f%%)", arrow, Math.abs(diff), pct);
+
+        return new EmbedBuilder()
+                .setTitle(titleEmoji + "  USD / KRW  환율")
+                .setColor(sidebarColor)
+                .addField("현재", displayRate + " 원", true)
+                .addField("전일 대비", diffText, true)
+                .setImage("attachment://exchange_rate.png")
+                .setFooter(source)
+                .build();
     }
 }

@@ -30,6 +30,7 @@ dependencies {
     implementation group: 'net.dv8tion', name: 'JDA', version: '5.2.2'
     implementation 'com.opencsv:opencsv:5.8'
     implementation 'org.springframework.boot:spring-boot-starter-json'
+    implementation 'org.knowm.xchart:xchart:3.8.6'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
