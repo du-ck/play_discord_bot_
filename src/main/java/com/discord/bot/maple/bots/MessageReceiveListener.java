@@ -8,6 +8,8 @@ import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.utils.FileUpload;
 
+import java.awt.Color;
+
 import org.jetbrains.annotations.NotNull;
 import org.springframework.stereotype.Component;
 
@@ -126,7 +128,7 @@ public class MessageReceiveListener extends ListenerAdapter {
                 "!연뿌\n" +
                 "!반상\n" +
                 "!몬파\n" +
-                //"!환율\n" +
+                "!환율\n" +
                 "/연뿌등록\n" +
                 "/연뿌초기화\n" +
                 "/조각계산\n" +
@@ -215,21 +217,24 @@ public class MessageReceiveListener extends ListenerAdapter {
     }
 
     private void handleMaxDoping(MessageReceivedEvent event) {
-        event.getChannel().sendMessage(
-                "## **극한의 영끌 도핑**\n\n" +
-                "•  **탕윤의 절대미각** : 공/마 +10 (20분)\n" +
-                "  └ *방법: 탕윤의 요리교실 요리5번 완료 후 소금 n만큼 넣기*\n\n" +
-                "•  **유가든 랜덤버프** : 공/마 +20 (30분)\n" +
-                "  └ *방법: 유가든 일퀘 NPC 'Suan Ming'에게 코인 1개 지불 (1일 1회)*\n\n" +
-                "•  **결혼 버프** : 공/마 +60 (하객 1명 기준)\n\n" +
-                "•  **쇼와타운 랜덤마블** : 올스탯/공/마 +30 (30분)\n" +
-                "  └ *Peerless Marble 획득 (1일 1회)*\n" +
-                "  └ *참고 :  [유튜브](<https://youtu.be/GbO_gu4QFNQ>)*\n\n" +
-                "**추천 사용 순서**\n" +
-                "```\n" +
-                "탕윤 ➔  유가든 ➔  결혼 ➔  마이홈 ➔  인기도 ➔  랜덤마블(버프 수락을 전구로 가능)\n" +
-                "```"
-        ).queue();
+        MessageEmbed embed = new EmbedBuilder()
+                .setTitle("극한의 영끌 도핑")
+                .setColor(new Color(0xf0, 0xa5, 0x00))
+                .addField("탕윤의 절대미각",
+                        "공/마 **+10** · [20분]\n└ 요리교실 5회 완료 후 소금 넣기", false)
+                .addField("유가든 랜덤버프",
+                        "공/마 **+20** · [30분]\n└ Suan Ming에게 코인 1개 지불 *(1일 1회)*", false)
+                .addField("결혼 버프",
+                        "공/마 **+60**\n└ 하객 1명 기준", false)
+                .addField("쇼와타운 랜덤마블",
+                        "올스탯/공/마 **+30** · [30분]\n└ Peerless Marble 획득 *(1일 1회)* · [유튜브](<https://youtu.be/GbO_gu4QFNQ>)", false)
+                .addField("Beast of Fury",
+                        "공/마 **+5** · [5분 + 벞지]\n└ 칭호 착용 후 스킬 사용 시 획득 · [유튜브](<https://youtu.be/w4XkkoaYx_k?si=RBRbZhqn9wjJSggI>)", false)
+                .addField("추천 사용 순서",
+                        "```\n탕윤 → 유가든 → 결혼 → 마이홈 → 인기도 → 랜덤마블 → BOF\n```", false)
+                .build();
+
+        event.getChannel().sendMessageEmbeds(embed).queue();
     }
 
     private void handleGuide(MessageReceivedEvent event) {
@@ -292,24 +297,22 @@ public class MessageReceiveListener extends ListenerAdapter {
     }
 
     private void handleExchangeRate(MessageReceivedEvent event) {
-        MessageEmbed embed = exchangeRateService.getCachedEmbed();
         byte[] chart = exchangeRateService.getCachedChartBytes();
 
-        if (embed == null || chart == null) {
-            exchangeRateService.tryRefreshOnce();
-            event.getChannel().sendMessage("환율 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.").queue();
+        if (chart == null) {
+            exchangeRateService.tryRefreshChartOnce();
+            event.getChannel().sendMessage("그래프를 불러오는 중입니다. 잠시 후 다시 시도해주세요.").queue();
             return;
         }
 
-        // 오늘 환율 데이터가 없으면(주말/공휴일) 푸터 변경
-        if (exchangeRateService.getCachedRateStr() == null) {
-            embed = new EmbedBuilder(embed)
-                    .setFooter("주말/공휴일로 인해 최근 영업일 기준")
-                    .build();
+        try {
+            MessageEmbed embed = exchangeRateService.fetchLiveEmbed();
+            event.getChannel().sendMessageEmbeds(embed)
+                    .addFiles(FileUpload.fromData(chart, "exchange_rate.png"))
+                    .queue();
+        } catch (Exception e) {
+            event.getChannel().sendMessage("환율 정보를 불러오는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.").queue();
+            System.err.println("[handleExchangeRate] 네이버 API 오류: " + e.getMessage());
         }
-
-        event.getChannel().sendMessageEmbeds(embed)
-                .addFiles(FileUpload.fromData(chart, "exchange_rate.png"))
-                .queue();
     }
 }

@@ -48,135 +48,122 @@ public class ExchangeRateService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final DateTimeFormatter SEARCH_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final int MAX_RETRIES = 10;
-    private static final long RETRY_INTERVAL_MS = 120_000L; // 2분
 
-    // 캐시
-    private volatile MessageEmbed cachedEmbed;
+    // 네이버 API 응답 데이터
+    private record NaverRateResult(
+            String closePrice,        // "1,532.70"
+            String fluctuations,      // "18.20"
+            String fluctuationsRatio, // "1.20"
+            boolean rising,           // true=RISING, false=FALLING/EVEN
+            String localTradedAt,     // "2026-06-02T22:10:26+09:00"
+            boolean isToday           // localTradedAt 날짜 == 오늘
+    ) {}
+
+    // 그래프 캐시만 유지 (현재 환율은 호출 시마다 실시간 조회)
     private volatile byte[] cachedChartBytes;
-    private volatile String cachedRateStr;  // null이면 주말/공휴일
-    private final AtomicBoolean isRefreshing = new AtomicBoolean(false);
+    private final AtomicBoolean isChartRefreshing = new AtomicBoolean(false);
 
-    public MessageEmbed getCachedEmbed() { return cachedEmbed; }
     public byte[] getCachedChartBytes() { return cachedChartBytes; }
-    public String getCachedRateStr() { return cachedRateStr; }
 
     /**
-     * 캐시가 없을 때 !환율 입력 시 호출.
-     * 재시도 루프 없이 1회만 시도하고 성공 시 캐시 저장. 백그라운드 실행.
+     * 그래프 캐시가 없을 때 !환율 입력 시 호출.
+     * 백그라운드에서 그래프만 갱신.
      */
-    public void tryRefreshOnce() {
-        if (!isRefreshing.compareAndSet(false, true)) return;
+    public void tryRefreshChartOnce() {
+        if (!isChartRefreshing.compareAndSet(false, true)) return;
 
         CompletableFuture.runAsync(() -> {
             try {
-                fetchAndCache();
-                System.out.println("[ExchangeRateService] 수동 캐시 갱신 완료");
+                cachedChartBytes = buildChartBytes();
+                System.out.println("[ExchangeRateService] 그래프 캐시 갱신 완료");
             } catch (Exception e) {
-                System.err.println("[ExchangeRateService] 수동 캐시 갱신 실패: " + e.getMessage());
+                System.err.println("[ExchangeRateService] 그래프 캐시 갱신 실패: " + e.getMessage());
             } finally {
-                isRefreshing.set(false);
+                isChartRefreshing.set(false);
             }
         });
     }
 
     // ───────── 캐시 갱신 ─────────
 
-    /** 앱 시작 시 최초 1회 로드 */
+    /** 앱 시작 시 그래프 캐시 1회 로드 */
     @PostConstruct
     public void init() {
         try {
-            fetchAndCache();
-            System.out.println("[ExchangeRateService] 초기 환율 캐시 로드 완료");
+            cachedChartBytes = buildChartBytes();
+            System.out.println("[ExchangeRateService] 초기 그래프 캐시 로드 완료");
         } catch (Exception e) {
-            System.err.println("[ExchangeRateService] 초기 환율 캐시 로드 실패: " + e.getMessage());
+            System.err.println("[ExchangeRateService] 초기 그래프 캐시 로드 실패: " + e.getMessage());
         }
     }
 
-    /**
-     * 공통 fetch + 캐시 저장 로직.
-     * getCurrentRate(오늘날짜) + getHistoricalRates(22) 병렬 호출 후 캐시 갱신.
-     * searchdate를 명시해야 오늘 데이터가 확실히 반환됨 (null 조회는 어제 데이터가 올 수 있음).
-     */
-    private void fetchAndCache() throws Exception {
-        String todayParam = LocalDate.now().format(SEARCH_DATE_FORMATTER);
-
-        CompletableFuture<String> rateFuture = CompletableFuture.supplyAsync(() -> {
-            try { return getCurrentRate(todayParam); } catch (Exception e) { return null; }
-        });
-        CompletableFuture<TreeMap<String, Double>> histFuture = CompletableFuture.supplyAsync(() -> {
-            try { return getHistoricalRates(22); } catch (Exception e) { return new TreeMap<>(); }
-        });
-
-        String rate = rateFuture.get();
-        TreeMap<String, Double> hist = histFuture.get();
-
-        // 오늘 데이터가 있으면 그래프에도 포함
-        if (rate != null) {
-            hist.put(LocalDate.now().toString(), Double.parseDouble(rate.replace(",", "")));
-        }
-
-        byte[] chart = getChartImage(hist);
-        cachedEmbed = buildEmbed(rate, hist);
-        cachedChartBytes = chart;
-        cachedRateStr = rate;
-    }
-
-    /**
-     * 매 영업일 오전 11시 갱신.
-     * 오늘 날짜로 데이터를 조회하고, 미갱신이면 2분 간격으로 최대 10회 재시도.
-     * Exception 발생 시에도 재시도 계속 (네트워크 일시 오류 대응).
-     * (10회 초과 시 공휴일로 간주하고 종료)
-     */
+    /** 매 영업일 오전 11시 그래프 갱신 */
     @Scheduled(cron = "0 0 11 * * MON-FRI", zone = "Asia/Seoul")
-    public void refreshCache() {
-        String today = LocalDate.now().format(SEARCH_DATE_FORMATTER);
-
-        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            try {
-                String rate = getCurrentRate(today);
-
-                if (rate != null) {
-                    TreeMap<String, Double> hist = getHistoricalRates(22);
-                    hist.put(LocalDate.now().toString(), Double.parseDouble(rate.replace(",", "")));
-                    byte[] chart = getChartImage(hist);
-                    cachedEmbed = buildEmbed(rate, hist);
-                    cachedChartBytes = chart;
-                    cachedRateStr = rate;
-                    System.out.println("[ExchangeRateService] 환율 캐시 갱신 완료 (" + attempt + "회 시도)");
-                    return;
-                }
-
-                // 아직 미갱신
-                System.out.println("[ExchangeRateService] 환율 미갱신 (" + attempt + "/" + MAX_RETRIES + "), " +
-                        (RETRY_INTERVAL_MS / 60_000) + "분 후 재시도");
-                Thread.sleep(RETRY_INTERVAL_MS);
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                System.err.println("[ExchangeRateService] 재시도 중 인터럽트");
-                return;
-            } catch (Exception e) {
-                // 네트워크 일시 오류 등 → 재시도 계속
-                System.err.println("[ExchangeRateService] 환율 갱신 오류 (" + attempt + "/" + MAX_RETRIES + "): " + e.getMessage());
-                try {
-                    Thread.sleep(RETRY_INTERVAL_MS);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-            }
+    public void refreshChartCache() {
+        try {
+            cachedChartBytes = buildChartBytes();
+            System.out.println("[ExchangeRateService] 그래프 캐시 갱신 완료");
+        } catch (Exception e) {
+            System.err.println("[ExchangeRateService] 그래프 캐시 갱신 실패: " + e.getMessage());
         }
+    }
 
-        System.err.println("[ExchangeRateService] 최대 재시도 초과 — 공휴일이거나 API 장애 가능성");
+    /**
+     * 수출입은행 히스토리 데이터로 그래프 PNG 생성.
+     */
+    private byte[] buildChartBytes() throws Exception {
+        TreeMap<String, Double> hist = getHistoricalRates(22);
+        // 오늘 수출입은행 데이터도 포함 시도
+        String todayRate = getCurrentRate(LocalDate.now().format(SEARCH_DATE_FORMATTER));
+        if (todayRate != null) {
+            hist.put(LocalDate.now().toString(), Double.parseDouble(todayRate.replace(",", "")));
+        }
+        return getChartImage(hist);
+    }
+
+    // ───────── 실시간 환율 조회 ─────────
+
+    /**
+     * 네이버 API 실시간 호출 후 embed 반환.
+     * !환율 명령어마다 호출됨.
+     */
+    public MessageEmbed fetchLiveEmbed() throws Exception {
+        NaverRateResult naverRate = getNaverRate();
+        return buildEmbed(naverRate);
     }
 
     // ───────── API 호출 ─────────
 
     /**
-     * 한국수출입은행 API에서 USD/KRW 매매기준율 반환.
-     * @param searchDate yyyyMMdd 형식의 날짜. null이면 당일 최신 데이터 조회.
-     *                   주말/공휴일 또는 미갱신 시 null 반환.
+     * 네이버 모바일 API에서 USD/KRW 현재 환율 + 전일 대비 데이터 반환.
+     */
+    private NaverRateResult getNaverRate() throws Exception {
+        String url = "https://m.stock.naver.com/front-api/marketIndex/exchange/exchangeCodes?exchangeCodes=FX_USDKRW";
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Accept", "application/json")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build();
+        HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        JsonNode root = objectMapper.readTree(res.body());
+        JsonNode result = root.path("result").get(0);
+
+        String closePrice = result.path("closePrice").asText();
+        String fluctuations = result.path("fluctuations").asText();
+        String fluctuationsRatio = result.path("fluctuationsRatio").asText();
+        boolean rising = "RISING".equals(result.path("fluctuationsType").path("name").asText());
+        String localTradedAt = result.path("localTradedAt").asText();
+
+        LocalDate tradedDate = LocalDate.parse(localTradedAt.substring(0, 10));
+        boolean isToday = tradedDate.equals(LocalDate.now());
+
+        return new NaverRateResult(closePrice, fluctuations, fluctuationsRatio, rising, localTradedAt, isToday);
+    }
+
+    /**
+     * 한국수출입은행 API에서 USD/KRW 매매기준율 반환. (히스토리 그래프용)
      */
     private String getCurrentRate(String searchDate) throws Exception {
         String url = "https://oapi.koreaexim.go.kr/site/program/financial/exchangeJSON"
@@ -192,7 +179,7 @@ public class ExchangeRateService {
         JsonNode array = objectMapper.readTree(res.body());
         for (JsonNode node : array) {
             if ("USD".equals(node.path("cur_unit").asText())) {
-                return node.path("deal_bas_r").asText(); // 예: "1,395.00"
+                return node.path("deal_bas_r").asText();
             }
         }
         return null;
@@ -200,8 +187,6 @@ public class ExchangeRateService {
 
     /**
      * 캘린더 기준 businessDays * 2일 조회 후 마지막 businessDays개 영업일 데이터 반환.
-     * 주말/공휴일 제외 후에도 항상 businessDays개에 가까운 데이터 포인트 보장.
-     * 각 날짜를 병렬 요청으로 가져옴.
      */
     private TreeMap<String, Double> getHistoricalRates(int businessDays) throws Exception {
         int calendarDays = businessDays * 2;
@@ -224,7 +209,6 @@ public class ExchangeRateService {
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
         TreeMap<String, Double> sorted = new TreeMap<>(temp);
 
-        // 최근 businessDays개만 반환
         if (sorted.size() > businessDays) {
             List<String> keys = new ArrayList<>(sorted.keySet());
             TreeMap<String, Double> result = new TreeMap<>();
@@ -268,7 +252,6 @@ public class ExchangeRateService {
         styler.setDatePattern("MM/dd");
         styler.setYAxisDecimalPattern("#,###");
 
-        // Y축 여백: 데이터 최솟값보다 약간 낮게 설정해 선이 바닥에 붙지 않게
         double minVal = yData.stream().mapToDouble(Double::doubleValue).min().orElse(0);
         double maxVal = yData.stream().mapToDouble(Double::doubleValue).max().orElse(0);
         double padding = (maxVal - minVal) * 0.1;
@@ -287,44 +270,36 @@ public class ExchangeRateService {
 
     // ───────── 메시지 빌드 ─────────
 
-    private MessageEmbed buildEmbed(String currentRateStr, TreeMap<String, Double> historical) {
-        // hist에 오늘 데이터가 포함될 수 있으므로 오늘 키 제외 후 전일 계산
-        String todayKey = LocalDate.now().toString();
-        List<Map.Entry<String, Double>> entries = historical.entrySet().stream()
-                .filter(e -> !e.getKey().equals(todayKey))
-                .collect(Collectors.toList());
-        int size = entries.size();
+    private MessageEmbed buildEmbed(NaverRateResult naverRate) {
+        boolean isToday = naverRate.isToday();
 
-        double latestHistorical = size > 0 ? entries.get(size - 1).getValue() : 0;
-        double secondLatest    = size >= 2 ? entries.get(size - 2).getValue() : latestHistorical;
+        String displayRate;
+        String diffText;
+        boolean rising;
+        String footerText;
 
-        double currentRate = (currentRateStr != null)
-                ? Double.parseDouble(currentRateStr.replace(",", ""))
-                : latestHistorical;
+        if (isToday) {
+            displayRate = naverRate.closePrice();
+            rising = naverRate.rising();
+            String arrow = rising ? "▲" : "▼";
+            diffText = String.format("%s %s (%s%%)", arrow, naverRate.fluctuations(), naverRate.fluctuationsRatio());
+            // "2026-06-02T22:10:26+09:00" → "06/02 22:10"
+            String tradedAt = naverRate.localTradedAt().substring(5, 16).replace("T", " ");
+            footerText = tradedAt + " 기준";
+        } else {
+            // 주말/공휴일 — 네이버가 마지막 영업일 데이터를 그대로 반환
+            displayRate = naverRate.closePrice();
+            rising = naverRate.rising();
+            String arrow = rising ? "▲" : "▼";
+            diffText = String.format("%s %s (%s%%)", arrow, naverRate.fluctuations(), naverRate.fluctuationsRatio());
+            String tradedAt = naverRate.localTradedAt().substring(5, 16).replace("T", " ");
+            footerText = tradedAt + " 기준";
+        }
 
-        // 오늘 데이터 있음 → 전일 = 어제(역사 마지막)
-        // 오늘 데이터 없음(주말) → 전일 = 마지막에서 두 번째
-        double prevRate = (currentRateStr != null) ? latestHistorical : secondLatest;
-
-        double diff = currentRate - prevRate;
-        double pct  = prevRate != 0 ? (diff / prevRate * 100) : 0;
-
-        String arrow = diff >= 0 ? "▲" : "▼";
-
-        String displayRate = (currentRateStr != null)
-                ? currentRateStr
-                : String.format("%.2f", latestHistorical);
-        String source = (currentRateStr != null)
-                ? "매 영업일 오전 11시 갱신"
-                : "주말/공휴일로 인해 최근 영업일 오전 11시 기준";
-
-        // 상승 → 빨간 사이드바 / 하락 → 파란 사이드바 (한국 주식 관례)
-        Color sidebarColor = diff >= 0
+        Color sidebarColor = rising
                 ? new Color(0xed, 0x42, 0x45)
                 : new Color(0x58, 0x65, 0xf2);
-
-        String titleEmoji = diff >= 0 ? "📈" : "📉";
-        String diffText = String.format("%s %.2f (%+.2f%%)", arrow, Math.abs(diff), pct);
+        String titleEmoji = rising ? "📈" : "📉";
 
         return new EmbedBuilder()
                 .setTitle(titleEmoji + "  USD / KRW  환율")
@@ -332,7 +307,7 @@ public class ExchangeRateService {
                 .addField("현재", displayRate + " 원", true)
                 .addField("전일 대비", diffText, true)
                 .setImage("attachment://exchange_rate.png")
-                .setFooter(source)
+                .setFooter(footerText)
                 .build();
     }
 }
