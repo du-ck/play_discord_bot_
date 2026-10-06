@@ -31,7 +31,7 @@ public class JdaConfig {
 
         JDA jda = JDABuilder.createDefault(botConfig.getBotToken())
                 .enableIntents(intents)
-                .setActivity(Activity.customStatus("재핵ㄱㄱ혓"))
+                .setActivity(Activity.customStatus("다음주면 LA콘이구나...."))
                 .addEventListeners(messageReceiveListener)    // Spring 빈 주입
                 .addEventListeners(slashReceiveListener)      // Spring 빈 주입
                 .addEventListeners(bossScheduleListener)      // Spring 빈 주입
@@ -49,6 +49,7 @@ public class JdaConfig {
                                         .addChoice("강화코어", "강화코어")
                                         .addChoice("마스터리코어", "마스터리코어")
                                         .addChoice("스킬코어", "스킬코어")
+                                        .addChoice("3차스킬코어", "3차스킬코어")
                                         .addChoice("공용코어", "공용코어")
                                         .addChoice("3차공용코어", "3차공용코어"),
                                 new OptionData(OptionType.INTEGER, "현재레벨", "현재 레벨", true),

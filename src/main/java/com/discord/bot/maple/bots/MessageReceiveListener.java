@@ -4,8 +4,11 @@ import com.discord.bot.maple.bots.exp.ExpTrain;
 import com.discord.bot.maple.bots.exp.ExpTrainHolder;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.MessageEmbed;
+import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import net.dv8tion.jda.api.interactions.components.ActionRow;
+import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.utils.FileUpload;
 
 import java.awt.Color;
@@ -23,11 +26,15 @@ public class MessageReceiveListener extends ListenerAdapter {
     private final Util util;
     private final ExpTrainHolder expTrainHolder;
     private final ExchangeRateService exchangeRateService;
+    private final ForceTableRenderer forceTableRenderer;
 
-    public MessageReceiveListener(Util util, ExpTrainHolder expTrainHolder, ExchangeRateService exchangeRateService) {
+    public MessageReceiveListener(Util util, ExpTrainHolder expTrainHolder,
+                                  ExchangeRateService exchangeRateService,
+                                  ForceTableRenderer forceTableRenderer) {
         this.util = util;
         this.expTrainHolder = expTrainHolder;
         this.exchangeRateService = exchangeRateService;
+        this.forceTableRenderer = forceTableRenderer;
     }
 
     @Override
@@ -52,7 +59,7 @@ public class MessageReceiveListener extends ListenerAdapter {
             case "!연뿌" -> handleExpTrain(event);
             case "!5퍼" -> sendImage(event, "5percent.jpeg", "보스 5퍼");
             case "!렙반감", "!레벨반감" -> sendImage(event, "lvl_decrease.jpg", "렙반감");
-            case "!포뻥", "!포스" -> sendImages(event, List.of("arcane_bbung.png", "sacred_bbung.png"), "보스별 포스 및 포뻥");
+            case "!포뻥", "!포스" -> handleForceButtons(event);
             case "!메소반감" -> sendImage(event, "meso_decrease.png", "메소반감");
             case "!경험치반감" -> sendImage(event, "exp_decrease.png", "경험치반감");
             case "!도핑" -> sendImage(event, "doping.png", "GMS 도핑목록");
@@ -293,6 +300,54 @@ public class MessageReceiveListener extends ListenerAdapter {
                     .queue();
         } catch (Exception e) {
             System.out.println(e.getMessage());
+        }
+    }
+
+    private void handleForceButtons(MessageReceivedEvent event) {
+        event.getChannel()
+                .sendMessage("확인할 보스 유형을 선택하세요.")
+                .setActionRow(
+                        Button.primary("force_arcane", "아케인포스"),
+                        Button.secondary("force_sacred", "어센틱포스")
+                )
+                .queue();
+    }
+
+    @Override
+    public void onButtonInteraction(@NotNull ButtonInteractionEvent event) {
+        String id = event.getComponentId();
+        if (!id.equals("force_arcane") && !id.equals("force_sacred")) return;
+
+        event.deferEdit().queue();
+
+        try {
+            byte[] img;
+            ActionRow buttons;
+
+            if (id.equals("force_arcane")) {
+                img = forceTableRenderer.renderArcane();
+                buttons = ActionRow.of(
+                        Button.primary("force_arcane", "아케인포스").asDisabled(),
+                        Button.secondary("force_sacred", "어센틱포스")
+                );
+            } else {
+                img = forceTableRenderer.renderSacred();
+                buttons = ActionRow.of(
+                        Button.secondary("force_arcane", "아케인포스"),
+                        Button.primary("force_sacred", "어센틱포스").asDisabled()
+                );
+            }
+
+            String filename = id.equals("force_arcane") ? "arcane_force.png" : "sacred_force.png";
+            event.getHook()
+                    .editOriginalAttachments(FileUpload.fromData(img, filename))
+                    .setComponents(buttons)
+                    .setContent("")
+                    .setEmbeds(List.of())
+                    .queue();
+        } catch (Exception e) {
+            System.err.println("[force button] 이미지 렌더링 실패: " + e.getMessage());
+            event.getHook().editOriginal("이미지 생성 중 오류가 발생했습니다.").queue();
         }
     }
 

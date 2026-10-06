@@ -23,6 +23,11 @@ public class CoreCalculator {
     private final int[] SHARED_CORE_3rd_SOL_COSTS = {4,1,1,1,2,2,2,3,3,9,3,3,3,3,4,4,4,4,4,14,4,5,5,5,5,5,5,5,6,18};
     private final int[] SHARED_CORE_3rd_FRAGMENT_COSTS = {90, 25, 30, 35, 40, 45, 50, 55, 60, 180, 73, 81, 90, 98, 107, 115, 124, 132, 141, 315, 151, 160, 170, 179, 189, 198, 208, 217, 227, 450};
 
+
+    private final int[] SKILL_CORE_3rd_SOL_COSTS = {7,1,1,1,1,2,2,2,2,8,2,2,3,3,3,3,3,3,3,12,4,4,4,4,4,4,5,5,5,14};
+    private final int[] SKILL_CORE_3rd_FRAGMENT_COSTS = {140,21,26,30,34,38,43,47,51,142,62,69,77,83,91,98,105,112,120,252,128,136,145,152,161,168,177,184,193,357};
+
+
     public Map.Entry<Integer, Integer> calculatePiece(String coreType, int currentLevel, int targetLevel) {
 
         int sols = 0;
@@ -51,6 +56,10 @@ public class CoreCalculator {
             case "3차공용코어":
                 solCosts = SHARED_CORE_3rd_SOL_COSTS;
                 fragmentCosts = SHARED_CORE_3rd_FRAGMENT_COSTS;
+                break;
+            case "3차스킬코어":
+                solCosts = SKILL_CORE_3rd_SOL_COSTS;
+                fragmentCosts = SKILL_CORE_3rd_FRAGMENT_COSTS;
                 break;
         }
         for (int i = currentLevel; i < targetLevel; i++) {

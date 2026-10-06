@@ -83,11 +83,11 @@ public class SlashReceiveListener extends ListenerAdapter {
                     break;
                 }
                 Map.Entry<Integer, Integer> calculateResult = coreCalculator.calculatePiece(coreType, currentLevel, targetLevel);
-                File file = util.getFile("erda_piece.png");
+                //File file = util.getFile("erda_piece.png");
                 event.reply("**" + coreType + "** 의 **" + currentLevel + "레벨** 부터 **" + targetLevel + "레벨** 까지\n" +
                                 "필요한 솔 개수는 **" + calculateResult.getKey() + " 개** 이고,\n" +
                                 "필요한 조각 개수는 **" + calculateResult.getValue() + " 개** 입니다.")
-                        .addFiles(FileUpload.fromData(file))
+                        //.addFiles(FileUpload.fromData(file))
                         .queue();
                 break;
             case "연뿌등록":
