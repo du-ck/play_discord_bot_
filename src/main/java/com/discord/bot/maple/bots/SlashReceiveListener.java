@@ -14,10 +14,8 @@ import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.commands.build.CommandData;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.components.ActionRow;
-import net.dv8tion.jda.api.utils.FileUpload;
 import org.springframework.stereotype.Component;
 
-import java.io.File;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -83,11 +81,9 @@ public class SlashReceiveListener extends ListenerAdapter {
                     break;
                 }
                 Map.Entry<Integer, Integer> calculateResult = coreCalculator.calculatePiece(coreType, currentLevel, targetLevel);
-                //File file = util.getFile("erda_piece.png");
                 event.reply("**" + coreType + "** 의 **" + currentLevel + "레벨** 부터 **" + targetLevel + "레벨** 까지\n" +
                                 "필요한 솔 개수는 **" + calculateResult.getKey() + " 개** 이고,\n" +
                                 "필요한 조각 개수는 **" + calculateResult.getValue() + " 개** 입니다.")
-                        //.addFiles(FileUpload.fromData(file))
                         .queue();
                 break;
             case "연뿌등록":
@@ -156,11 +152,10 @@ public class SlashReceiveListener extends ListenerAdapter {
                     break;
                 }
                 int result = fragmentCalculator.calculateFragments(killCount, itemDropRatePct, totalNeedFragment);
-                File file2 = util.getFile("wealth_small_2.png");
                 event.reply("**" + totalNeedFragment + "** 개의 조각을 얻기 위해 \n" +
                                 "필요한 소재비 개수는 **" + result + " 개** 입니다.\n" +
                                 "지금 바로 재획 ㄱㄱ혓")
-                        .addFiles(FileUpload.fromData(file2))
+                        .addFiles(util.upload("wealth_small_2.png"))
                         .queue();
                 break;
         }

@@ -5,8 +5,6 @@ import com.opencsv.CSVReader;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Component;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -30,7 +28,8 @@ public class ExpLoader {
     public static void loadExpTable() {
         Util util = new Util();
 
-        try (CSVReader reader = new CSVReader(new FileReader(util.getFile("exp.csv")))) {
+        try (CSVReader reader = new CSVReader(
+                new InputStreamReader(util.stream("exp.csv"), StandardCharsets.UTF_8))) {
             String[] nextLine;
             boolean isHeader = true;
             while ((nextLine = reader.readNext()) != null) {

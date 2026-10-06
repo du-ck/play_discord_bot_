@@ -7,8 +7,8 @@ import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 
 @Service
@@ -23,35 +23,26 @@ public class ImageRenderer {
         }
     }
 
-    private static final String[] FONT_PATHS = {
-        "C:/Windows/Fonts/malgun.ttf",
-        "/usr/share/fonts/malgun.ttf",
-        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-        "/usr/share/fonts/nanum/NanumGothic.ttf",
-        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    };
+    /** jar 에 동봉된 한글 폰트. 서버에 폰트가 깔려있지 않아도 한글이 깨지지 않는다. (OFL 1.1) */
+    private static final String BUNDLED_FONT = "fonts/NanumGothic.ttf";
 
     private String fontFamily = Font.SANS_SERIF;
 
     @PostConstruct
     public void init() {
         GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
-        for (String path : FONT_PATHS) {
-            File f = new File(path);
-            if (f.exists()) {
-                try {
-                    Font font = Font.createFont(Font.TRUETYPE_FONT, f);
-                    ge.registerFont(font);
-                    fontFamily = font.getFamily();
-                    System.out.println("[ImageRenderer] 폰트 등록: " + font.getFontName());
-                    return;
-                } catch (Exception e) {
-                    System.err.println("[ImageRenderer] 폰트 로드 실패(" + path + "): " + e.getMessage());
-                }
+        try (InputStream in = ImageRenderer.class.getClassLoader().getResourceAsStream(BUNDLED_FONT)) {
+            if (in == null) {
+                System.err.println("[ImageRenderer] 번들 폰트를 찾지 못했습니다: " + BUNDLED_FONT + " — 기본 폰트 사용.");
+                return;
             }
+            Font font = Font.createFont(Font.TRUETYPE_FONT, in);
+            ge.registerFont(font);
+            fontFamily = font.getFamily();
+            System.out.println("[ImageRenderer] 폰트 등록: " + font.getFontName());
+        } catch (Exception e) {
+            System.err.println("[ImageRenderer] 폰트 로드 실패 — 기본 폰트 사용: " + e.getMessage());
         }
-        System.err.println("[ImageRenderer] 한글 폰트를 찾지 못했습니다. 기본 폰트 사용.");
     }
 
     public byte[] renderTable(String title, String accentHex, String targetLabel, List<TableRow> rows) {

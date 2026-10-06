@@ -20,7 +20,6 @@ import java.awt.Color;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.stereotype.Component;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -128,9 +127,8 @@ public class MessageReceiveListener extends ListenerAdapter {
 
     private void sendImage(MessageReceivedEvent event, String filename, String title) {
         try {
-            File file = util.getFile(filename);
             event.getChannel().sendMessage(title)
-                    .addFiles(FileUpload.fromData(file))
+                    .addFiles(util.upload(filename))
                     .queue();
         } catch (Exception e) {
             System.out.println(e.getMessage());
@@ -141,7 +139,7 @@ public class MessageReceiveListener extends ListenerAdapter {
         try {
             List<FileUpload> uploads = new ArrayList<>();
             for (String filename : filenames) {
-                uploads.add(FileUpload.fromData(util.getFile(filename)));
+                uploads.add(util.upload(filename));
             }
             event.getChannel().sendMessage(title)
                     .addFiles(uploads)
@@ -215,14 +213,12 @@ public class MessageReceiveListener extends ListenerAdapter {
 
     private void handleEsfera(MessageReceivedEvent event) {
         try {
-            File file1 = util.getFile("esfera1.png");
-            File file2 = util.getFile("esfera.png");
             event.getChannel()
                     .sendMessage(">>> ## 에스페라 주간퀘 가이드\n" +
                             "이미지 혹은 아래 링크의 가이드 중 편한 방법으로 진행\n" +
                             "- [미니맵 활용 가이드](<https://archive.is/j0esZ>)")
-                    .addFiles(FileUpload.fromData(file1))
-                    .addFiles(FileUpload.fromData(file2))
+                    .addFiles(util.upload("esfera1.png"))
+                    .addFiles(util.upload("esfera.png"))
                     .queue();
         } catch (Exception e) {
             System.out.println(e.getMessage());
@@ -315,13 +311,12 @@ public class MessageReceiveListener extends ListenerAdapter {
 
     private void handleFlame(MessageReceivedEvent event) {
         try {
-            File file = util.getFile("flame_score.png");
             event.getChannel().sendMessage(
                     "[추옵 계산 사이트](<https://www.whackybeanz.com/calc/equips/setup>) \n" +
                     "[추옵 계산 사이트 가이드](<https://archive.is/WNEKB>) \n" +
                     "## 장비 렙제별 적정 추옵표 \n" +
                     "Mid 단계까지는 강/영환불, 그 이후로는 검환불 추천")
-                    .addFiles(FileUpload.fromData(file))
+                    .addFiles(util.upload("flame_score.png"))
                     .queue();
         } catch (Exception e) {
             System.out.println(e.getMessage());
@@ -330,7 +325,6 @@ public class MessageReceiveListener extends ListenerAdapter {
 
     private void handleMonsterPark(MessageReceivedEvent event) {
         try {
-            File file = util.getFile("monster_park.png");
             event.getChannel().sendMessage(
                     "몬스터파크 경험치 표 \n" +
                     "```" +
@@ -340,7 +334,7 @@ public class MessageReceiveListener extends ListenerAdapter {
                     "- 50% + 50% + 250% (보약 + 일요일 + 썬데이) : 4.5배 \n" +
                     "- 50% + 50% + 30% + 250% (보약 + 일요일 + 썬데이 + 모래시계) : 4.8배 \n" +
                     "```")
-                    .addFiles(FileUpload.fromData(file))
+                    .addFiles(util.upload("monster_park.png"))
                     .queue();
         } catch (Exception e) {
             System.out.println(e.getMessage());
