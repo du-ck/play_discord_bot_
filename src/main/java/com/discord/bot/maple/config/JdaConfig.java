@@ -3,6 +3,7 @@ package com.discord.bot.maple.config;
 import com.discord.bot.maple.bots.MessageReceiveListener;
 import com.discord.bot.maple.bots.SlashReceiveListener;
 import com.discord.bot.maple.bots.schedule.BossScheduleListener;
+import com.discord.bot.maple.bots.status.BotStatusRepository;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Activity;
@@ -20,18 +21,20 @@ public class JdaConfig {
 
     @Bean
     public JDA jda(BotConfig botConfig,
+                   BotStatusRepository botStatusRepository,
                    MessageReceiveListener messageReceiveListener,
                    SlashReceiveListener slashReceiveListener,
                    BossScheduleListener bossScheduleListener) throws Exception {
 
         EnumSet<GatewayIntent> intents = EnumSet.of(
                 GatewayIntent.GUILD_MESSAGES,
-                GatewayIntent.MESSAGE_CONTENT
+                GatewayIntent.MESSAGE_CONTENT,
+                GatewayIntent.DIRECT_MESSAGES   // !상태변경 을 DM 으로만 받기 위해 필요
         );
 
         JDA jda = JDABuilder.createDefault(botConfig.getBotToken())
                 .enableIntents(intents)
-                .setActivity(Activity.customStatus("다음주면 LA콘이구나...."))
+                .setActivity(Activity.customStatus(botStatusRepository.currentText()))
                 .addEventListeners(messageReceiveListener)    // Spring 빈 주입
                 .addEventListeners(slashReceiveListener)      // Spring 빈 주입
                 .addEventListeners(bossScheduleListener)      // Spring 빈 주입

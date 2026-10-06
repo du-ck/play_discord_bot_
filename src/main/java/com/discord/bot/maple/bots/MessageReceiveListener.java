@@ -2,7 +2,11 @@ package com.discord.bot.maple.bots;
 
 import com.discord.bot.maple.bots.exp.ExpTrain;
 import com.discord.bot.maple.bots.exp.ExpTrainHolder;
+import com.discord.bot.maple.bots.status.BotStatusEntity;
+import com.discord.bot.maple.bots.status.BotStatusRepository;
+import com.discord.bot.maple.config.BotConfig;
 import net.dv8tion.jda.api.EmbedBuilder;
+import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
@@ -23,18 +27,26 @@ import java.util.List;
 @Component
 public class MessageReceiveListener extends ListenerAdapter {
 
+    private static final String STATUS_COMMAND = "!상태변경";
+
     private final Util util;
     private final ExpTrainHolder expTrainHolder;
     private final ExchangeRateService exchangeRateService;
     private final ForceTableRenderer forceTableRenderer;
+    private final BotConfig botConfig;
+    private final BotStatusRepository botStatusRepository;
 
     public MessageReceiveListener(Util util, ExpTrainHolder expTrainHolder,
                                   ExchangeRateService exchangeRateService,
-                                  ForceTableRenderer forceTableRenderer) {
+                                  ForceTableRenderer forceTableRenderer,
+                                  BotConfig botConfig,
+                                  BotStatusRepository botStatusRepository) {
         this.util = util;
         this.expTrainHolder = expTrainHolder;
         this.exchangeRateService = exchangeRateService;
         this.forceTableRenderer = forceTableRenderer;
+        this.botConfig = botConfig;
+        this.botStatusRepository = botStatusRepository;
     }
 
     @Override
@@ -43,6 +55,12 @@ public class MessageReceiveListener extends ListenerAdapter {
 
         String msg = event.getMessage().getContentDisplay();
         if (!msg.contains("!")) return;
+
+        // 관리자 전용. 서버 채널에 흔적이 남지 않도록 DM 에서만 받는다
+        if (!event.isFromGuild() && msg.startsWith(STATUS_COMMAND)) {
+            handleStatusChange(event, msg);
+            return;
+        }
 
         System.out.printf("[%s] %#s: %s\n",
                 event.getChannel(),
@@ -77,7 +95,33 @@ public class MessageReceiveListener extends ListenerAdapter {
             case "!반상" -> sendImage(event, "ring_box.png", "반지 상자 확률 정리표");
             case "!몬파" -> handleMonsterPark(event);
             case "!환율" -> handleExchangeRate(event);
+            case "!드아", "!곤아" -> sendImages(event, List.of("dragon_island_score.png", "dragon_island_build.png"), "드래곤 아일랜드 빌드");
         }
+    }
+
+    // ───────── 상태변경 (관리자 전용, DM) ─────────
+
+    private void handleStatusChange(MessageReceivedEvent event, String msg) {
+        // 권한 없는 사람에게는 명령어의 존재 자체를 알리지 않기 위해 조용히 무시한다
+        if (!botConfig.isAdmin(event.getAuthor().getId())) return;
+
+        String text = msg.substring(STATUS_COMMAND.length()).trim();
+
+        if (text.isEmpty()) {
+            event.getChannel().sendMessage("사용법: `" + STATUS_COMMAND + " 표시할문구`").queue();
+            return;
+        }
+        if (text.length() > BotStatusEntity.MAX_LENGTH) {
+            event.getChannel().sendMessage(
+                    "❌ 상태 문구는 " + BotStatusEntity.MAX_LENGTH + "자 이내여야 합니다. (입력: " + text.length() + "자)").queue();
+            return;
+        }
+
+        // 저장이 실패해도 현재 세션 상태는 바뀐 채로 두는 편이, 저장만 되고 반영이 안 된 것보다 낫다
+        event.getJDA().getPresence().setActivity(Activity.customStatus(text));
+        botStatusRepository.save(new BotStatusEntity(text, event.getAuthor().getId()));
+
+        event.getChannel().sendMessage("✅ 상태 메시지를 변경했습니다.\n> " + text).queue();
     }
 
     // ───────── 파일 전송 헬퍼 ─────────
